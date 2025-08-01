@@ -3,5 +3,3 @@ uvicorn[standard]
 PyPDF2
 sendgrid
 python-multipart
-
-
