@@ -64,12 +64,19 @@ async def send_code(data: EmailRequest):
     code = generate_verification_code()
     verification_codes[email] = code
 
+    # message = Mail(
+    #     from_email="no-reply@techapppartners.com",
+    #     to_emails=email,
+    #     subject="Your Verification Code",
+    #     html_content=f"<p>Your verification code is: <strong>{code}</strong></p>"
+    # )
     message = Mail(
-        from_email="no-reply@techapppartners.com",
-        to_emails=email,
-        subject="Your Verification Code",
-        html_content=f"<p>Your verification code is: <strong>{code}</strong></p>"
-    )
+    from_email=("no-reply@techapppartners.com", "Nomad"),
+    to_emails=email,
+    subject="Your Verification Code",
+    html_content=f"<p>Your verification code is: <strong>{code}</strong></p>"
+)
+
 
     try:
         sg = SendGridAPIClient(SENDGRID_API_KEY)
