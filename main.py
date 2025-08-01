@@ -12,7 +12,7 @@ from PyPDF2 import PdfMerger
 app = FastAPI()
 
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
-verification_codes = {}  # Stores email: code pairs
+verification_codes = {}
 
 # ---------------- Models ---------------- #
 
@@ -64,19 +64,12 @@ async def send_code(data: EmailRequest):
     code = generate_verification_code()
     verification_codes[email] = code
 
-    # message = Mail(
-    #     from_email="no-reply@techapppartners.com",
-    #     to_emails=email,
-    #     subject="Your Verification Code",
-    #     html_content=f"<p>Your verification code is: <strong>{code}</strong></p>"
-    # )
     message = Mail(
-    from_email=("no-reply@techapppartners.com", "Nomad"),
-    to_emails=email,
-    subject="Your Verification Code",
-    html_content=f"<p>Your verification code is: <strong>{code}</strong></p>"
-)
-
+        from_email=("no-reply@techapppartners.com", "Nomad"),
+        to_emails=email,
+        subject="Your Verification Code",
+        html_content=f"<p>Your verification code is: <strong>{code}</strong></p>"
+    )
 
     try:
         sg = SendGridAPIClient(SENDGRID_API_KEY)
@@ -106,7 +99,7 @@ async def verify_code(data: VerificationRequest):
 @app.post("/send-email/")
 async def send_email(data: TextEmailRequest):
     message = Mail(
-        from_email="no-reply@techapppartners.com",
+        from_email=("no-reply@techapppartners.com", "Nomad"),
         to_emails=data.email,
         subject=data.subject,
         html_content=f"<p>{data.message}</p>"
@@ -130,7 +123,7 @@ async def send_email_with_files(
     files: list[UploadFile] = File(...)
 ):
     mail = Mail(
-        from_email="no-reply@techapppartners.com",
+        from_email=("no-reply@techapppartners.com", "Nomad"),
         to_emails=email,
         subject=subject,
         html_content=f"<p>{message}</p>"
