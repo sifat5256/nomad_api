@@ -8,6 +8,14 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
 from pydantic import BaseModel
 from PyPDF2 import PdfMerger
+import os
+import uuid
+import base64
+from fastapi import UploadFile, File, FastAPI
+
+
+from fpdf import FPDF
+from docx import Document
 
 app = FastAPI()
 
@@ -152,3 +160,64 @@ async def send_email_with_files(
         return {"message": f"Email sent with {len(attachments)} attachment(s)"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+def docx_to_pdf(file_path, output_path):
+    doc = Document(file_path)
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    for para in doc.paragraphs:
+        pdf.multi_cell(0, 10, para.text)
+    pdf.output(output_path)
+
+def txt_to_pdf(file_path, output_path):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            pdf.multi_cell(0, 10, line.strip())
+    pdf.output(output_path)
+
+@app.post("/merge-any-to-pdf/")
+async def merge_any_to_pdf(files: list[UploadFile] = File(...)):
+    temp_dir = "temp_files"
+    os.makedirs(temp_dir, exist_ok=True)
+    pdf_paths = []
+
+    try:
+        for file in files:
+            file_ext = file.filename.split(".")[-1].lower()
+            unique_name = f"{uuid.uuid4()}.{file_ext}"
+            temp_file_path = os.path.join(temp_dir, unique_name)
+
+            contents = await file.read()
+            with open(temp_file_path, "wb") as f:
+                f.write(contents)
+
+            output_pdf_path = temp_file_path.replace(f".{file_ext}", ".pdf")
+
+            if file_ext == "pdf":
+                pdf_paths.append(temp_file_path)
+            elif file_ext == "txt":
+                txt_to_pdf(temp_file_path, output_pdf_path)
+                pdf_paths.append(output_pdf_path)
+            elif file_ext == "docx":
+                docx_to_pdf(temp_file_path, output_pdf_path)
+                pdf_paths.append(output_pdf_path)
+            else:
+                return {"error": f"Unsupported file type: {file_ext}"}
+
+        merger = PdfMerger()
+        for path in pdf_paths:
+            merger.append(path)
+
+        final_pdf_path = os.path.join(temp_dir, "final_merged.pdf")
+        merger.write(final_pdf_path)
+        merger.close()
+
+        return FileResponse(final_pdf_path, filename="merged.pdf", media_type="application/pdf")
+
+    finally:
+        # Clean up temp files
+        for f in os.listdir(temp_dir):
+            os.remove(os.path.join(temp_dir, f))

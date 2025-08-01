@@ -3,3 +3,5 @@ uvicorn[standard]
 PyPDF2
 sendgrid
 python-multipart
+fpdf
+python-docx
