@@ -13,6 +13,12 @@ import uuid
 import base64
 from fastapi import UploadFile, File, FastAPI
 from fastapi import BackgroundTasks
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import FileResponse
+import os
+import shutil
+import uuid
+import subprocess
 
 
 from fpdf import FPDF
@@ -183,8 +189,47 @@ def txt_to_pdf(file_path, output_path):
 
 
 
-@app.post("/merge-any-to-pdf/")
-async def merge_any_to_pdf(background_tasks: BackgroundTasks, files: list[UploadFile] = File(...)):
+
+
+
+
+@app.post("/convert-to-pdf/")
+async def convert_to_pdf(file: UploadFile = File(...)):
+    # Step 1: Save the uploaded file
+    input_ext = os.path.splitext(file.filename)[1]
+    unique_id = str(uuid.uuid4())
+    input_filename = f"{unique_id}{input_ext}"
+    output_filename = f"{unique_id}.pdf"
+    
+    input_path = os.path.join("temp", input_filename)
+    output_path = os.path.join("temp", output_filename)
+
+    os.makedirs("temp", exist_ok=True)
+    
+    with open(input_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    # Step 2: Convert to PDF using LibreOffice
+    try:
+        subprocess.run([
+            "libreoffice", "--headless", "--convert-to", "pdf", "--outdir", "temp", input_path
+        ], check=True)
+
+        if not os.path.exists(output_path):
+            return {"error": "Conversion failed"}
+
+        # Step 3: Return the PDF as a downloadable response
+        return FileResponse(output_path, filename=output_filename, media_type="application/pdf")
+
+    except subprocess.CalledProcessError as e:
+        return {"error": "Failed to convert file", "details": str(e)}
+
+    finally:
+        # Clean up input file after conversion
+        if os.path.exists(input_path):
+            os.remove(input_path)
+
     temp_dir = "temp_files"
     os.makedirs(temp_dir, exist_ok=True)
     pdf_paths = []
