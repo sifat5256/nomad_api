@@ -19,7 +19,7 @@ import os
 import shutil
 import uuid
 import subprocess
-
+from docx2pdf import convert
 
 from fpdf import FPDF
 from docx import Document
@@ -186,16 +186,84 @@ def txt_to_pdf(file_path, output_path):
     pdf.output(output_path)
 
 
+def docx_to_pdf(input_path, output_path):
+    doc = Document(input_path)
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    for para in doc.paragraphs:
+        pdf.multi_cell(0, 10, para.text)
+    pdf.output(output_path)
 
 
 
+@app.post("/convert-doc-to-pdf/")
+async def convert_doc_to_pdf(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+    if not file.filename.endswith((".docx", ".doc")):
+        raise HTTPException(status_code=400, detail="File must be .docx or .doc")
+
+    temp_dir = "temp_docs"
+    os.makedirs(temp_dir, exist_ok=True)
+
+    # Generate unique filename
+    unique_id = str(uuid.uuid4())
+    input_path = os.path.join(temp_dir, f"{unique_id}.docx")
+    output_path = os.path.join(temp_dir, f"{unique_id}.pdf")
+
+    # Save uploaded file
+    with open(input_path, "wb") as f:
+        contents = await file.read()
+        f.write(contents)
+
+    # Convert .docx to PDF
+    try:
+        docx_to_pdf(input_path, output_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
+
+    # Clean up temp files after sending response
+    def cleanup():
+        try:
+            os.remove(input_path)
+            os.remove(output_path)
+        except:
+            pass
+
+    background_tasks.add_task(cleanup)
+
+    return FileResponse(output_path, media_type="application/pdf", filename=os.path.basename(output_path))
 
 
+    import time
+    time.sleep(5)
+    for f in os.listdir(temp_dir):
+        try:
+            os.remove(os.path.join(temp_dir, f))
+        except:
+            pass
 
+    if not file.filename.endswith((".docx", ".doc")):
+        raise HTTPException(status_code=400, detail="File must be .docx or .doc")
 
-@app.post("/convert-to-pdf/")
-async def convert_to_pdf(file: UploadFile = File(...)):
-    # Step 1: Save the uploaded file
+    input_dir = "temp_docs"
+    output_dir = "converted_pdfs"
+    os.makedirs(input_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+
+    unique_name = f"{uuid.uuid4()}.docx"
+    input_path = os.path.join(input_dir, unique_name)
+    output_path = os.path.join(output_dir, unique_name.replace(".docx", ".pdf"))
+
+    with open(input_path, "wb") as f:
+        f.write(await file.read())
+
+    try:
+        convert(input_path, output_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {e}")
+
+    return FileResponse(output_path, media_type='application/pdf', filename=os.path.basename(output_path))
+
     input_ext = os.path.splitext(file.filename)[1]
     unique_id = str(uuid.uuid4())
     input_filename = f"{unique_id}{input_ext}"
