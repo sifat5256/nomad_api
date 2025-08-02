@@ -19,7 +19,7 @@ import os
 import shutil
 import uuid
 import subprocess
-from docx2pdf import convert
+
 
 from fpdf import FPDF
 from docx import Document
@@ -186,52 +186,184 @@ def txt_to_pdf(file_path, output_path):
     pdf.output(output_path)
 
 
-def docx_to_pdf(input_path, output_path):
-    doc = Document(input_path)
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    for para in doc.paragraphs:
-        pdf.multi_cell(0, 10, para.text)
-    pdf.output(output_path)
 
 
 
-@app.post("/convert-doc-to-pdf/")
-async def convert_doc_to_pdf(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
-    if not file.filename.endswith((".docx", ".doc")):
-        raise HTTPException(status_code=400, detail="File must be .docx or .doc")
 
-    temp_dir = "temp_docs"
-    os.makedirs(temp_dir, exist_ok=True)
 
-    # Generate unique filename
+
+
+@app.post("/convert-to-pdf/")
+async def convert_to_pdf(file: UploadFile = File(...)):
+    # Step 1: Save the uploaded file
+    input_ext = os.path.splitext(file.filename)[1]
     unique_id = str(uuid.uuid4())
-    input_path = os.path.join(temp_dir, f"{unique_id}.docx")
-    output_path = os.path.join(temp_dir, f"{unique_id}.pdf")
+    input_filename = f"{unique_id}{input_ext}"
+    output_filename = f"{unique_id}.pdf"
+    
+    input_path = os.path.join("temp", input_filename)
+    output_path = os.path.join("temp", output_filename)
 
-    # Save uploaded file
+    os.makedirs("temp", exist_ok=True)
+    
     with open(input_path, "wb") as f:
-        contents = await file.read()
-        f.write(contents)
+        content = await file.read()
+        f.write(content)
 
-    # Convert .docx to PDF
+    # Step 2: Convert to PDF using LibreOffice
     try:
-        docx_to_pdf(input_path, output_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
+        subprocess.run([
+            "libreoffice", "--headless", "--convert-to", "pdf", "--outdir", "temp", input_path
+        ], check=True)
 
-    # Clean up temp files after sending response
-    def cleanup():
-        try:
+        if not os.path.exists(output_path):
+            return {"error": "Conversion failed"}
+
+        # Step 3: Return the PDF as a downloadable response
+        return FileResponse(output_path, filename=output_filename, media_type="application/pdf")
+
+    except subprocess.CalledProcessError as e:
+        return {"error": "Failed to convert file", "details": str(e)}
+
+    finally:
+        # Clean up input file after conversion
+        if os.path.exists(input_path):
             os.remove(input_path)
-            os.remove(output_path)
-        except:
-            pass
+
+    temp_dir = "temp_files"
+    os.makedirs(temp_dir, exist_ok=True)
+    pdf_paths = []
+
+    for file in files:
+        file_ext = file.filename.split(".")[-1].lower()
+        unique_name = f"{uuid.uuid4()}.{file_ext}"
+        temp_file_path = os.path.join(temp_dir, unique_name)
+
+        contents = await file.read()
+        with open(temp_file_path, "wb") as f:
+            f.write(contents)
+
+        output_pdf_path = temp_file_path.replace(f".{file_ext}", ".pdf")
+
+        if file_ext == "pdf":
+            pdf_paths.append(temp_file_path)
+        elif file_ext == "txt":
+            txt_to_pdf(temp_file_path, output_pdf_path)
+            pdf_paths.append(output_pdf_path)
+        elif file_ext == "docx":
+            docx_to_pdf(temp_file_path, output_pdf_path)
+            pdf_paths.append(output_pdf_path)
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")
+
+    # Merge all PDFs
+    merger = PdfMerger()
+    for path in pdf_paths:
+        merger.append(path)
+
+    final_pdf_path = os.path.join(temp_dir, "final_merged.pdf")
+    merger.write(final_pdf_path)
+    merger.close()
+
+    # Schedule deletion of temp files AFTER sending response
+    def cleanup():
+        import time
+        time.sleep(3)  # wait a bit to ensure file is sent
+        for f in os.listdir(temp_dir):
+            try:
+                os.remove(os.path.join(temp_dir, f))
+            except:
+                pass
 
     background_tasks.add_task(cleanup)
 
-    return FileResponse(output_path, media_type="application/pdf", filename=os.path.basename(output_path))
+    return FileResponse(path=final_pdf_path, filename="merged.pdf", media_type="application/pdf")
 
+    temp_dir = "temp_files"
+    os.makedirs(temp_dir, exist_ok=True)
+    pdf_paths = []
 
-    
+    for file in files:
+        file_ext = file.filename.split(".")[-1].lower()
+        unique_name = f"{uuid.uuid4()}.{file_ext}"
+        temp_file_path = os.path.join(temp_dir, unique_name)
+
+        contents = await file.read()
+        with open(temp_file_path, "wb") as f:
+            f.write(contents)
+
+        output_pdf_path = temp_file_path.replace(f".{file_ext}", ".pdf")
+
+        if file_ext == "pdf":
+            pdf_paths.append(temp_file_path)
+        elif file_ext == "txt":
+            txt_to_pdf(temp_file_path, output_pdf_path)
+            pdf_paths.append(output_pdf_path)
+        elif file_ext == "docx":
+            docx_to_pdf(temp_file_path, output_pdf_path)
+            pdf_paths.append(output_pdf_path)
+        else:
+            return {"error": f"Unsupported file type: {file_ext}"}
+
+    merger = PdfMerger()
+    for path in pdf_paths:
+        merger.append(path)
+
+    final_pdf_path = os.path.join(temp_dir, "final_merged.pdf")
+    merger.write(final_pdf_path)
+    merger.close()
+
+    # Schedule cleanup after response is sent
+    def cleanup():
+        for f in os.listdir(temp_dir):
+            try:
+                os.remove(os.path.join(temp_dir, f))
+            except:
+                pass
+
+    if background_tasks:
+        background_tasks.add_task(cleanup)
+
+    return FileResponse(final_pdf_path, filename="merged.pdf", media_type="application/pdf")
+
+    temp_dir = "temp_files"
+    os.makedirs(temp_dir, exist_ok=True)
+    pdf_paths = []
+
+    try:
+        for file in files:
+            file_ext = file.filename.split(".")[-1].lower()
+            unique_name = f"{uuid.uuid4()}.{file_ext}"
+            temp_file_path = os.path.join(temp_dir, unique_name)
+
+            contents = await file.read()
+            with open(temp_file_path, "wb") as f:
+                f.write(contents)
+
+            output_pdf_path = temp_file_path.replace(f".{file_ext}", ".pdf")
+
+            if file_ext == "pdf":
+                pdf_paths.append(temp_file_path)
+            elif file_ext == "txt":
+                txt_to_pdf(temp_file_path, output_pdf_path)
+                pdf_paths.append(output_pdf_path)
+            elif file_ext == "docx":
+                docx_to_pdf(temp_file_path, output_pdf_path)
+                pdf_paths.append(output_pdf_path)
+            else:
+                return {"error": f"Unsupported file type: {file_ext}"}
+
+        merger = PdfMerger()
+        for path in pdf_paths:
+            merger.append(path)
+
+        final_pdf_path = os.path.join(temp_dir, "final_merged.pdf")
+        merger.write(final_pdf_path)
+        merger.close()
+
+        return FileResponse(final_pdf_path, filename="merged.pdf", media_type="application/pdf")
+
+    finally:
+        # Clean up temp files
+        for f in os.listdir(temp_dir):
+            os.remove(os.path.join(temp_dir, f))
